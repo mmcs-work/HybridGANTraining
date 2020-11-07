@@ -27,8 +27,8 @@ class ResNet(nn.Module):
                  num_blocks, kernel_size, padding):
         super(ResNet, self).__init__()
         self.bn1 = nn.BatchNorm2d(in_channels)
-        self.conv1 = nn.utils.weight_norm(nn.Conv2d((2 * in_channels, mid_channels, kernel_size, padding, bias=True))
-        self.skip1 = nn.utils.weight_norm(nn.Conv2d((mid_channels, mid_channels, kernel_size=1, padding=0, bias=True))
+        self.conv1 = nn.utils.weight_norm(nn.Conv2d(2 * in_channels, mid_channels, kernel_size, padding, bias=True))
+        self.skip1 = nn.utils.weight_norm(nn.Conv2d(mid_channels, mid_channels, kernel_size=1, padding=0, bias=True))
 
         self.blocks = nn.ModuleList([ResidualBlock(mid_channels, mid_channels)
                                      for _ in range(num_blocks)])
@@ -36,7 +36,7 @@ class ResNet(nn.Module):
                                     for _ in range(num_blocks)])
 
         self.bn2 = nn.BatchNorm2d(mid_channels)
-        self.conv2 = nn.utils.weight_norm(nn.Conv2d((mid_channels, out_channels, kernel_size=1, padding=0, bias=True))
+        self.conv2 = nn.utils.weight_norm(nn.Conv2d(mid_channels, out_channels, kernel_size=1, padding=0, bias=True))
 
     def forward(self, x):
         x = self.bn1(x)
@@ -66,7 +66,8 @@ class RealNVP(nn.Module):
                                   nn.Linear(1000, mask.shape[0]))
         self.net_s = nn.Sequential(nn.Linear(mask.shape[0], 1000), 
                                   nn.ReLU(),
-                                  nn.Linear(1000, mask.shape[0]))
+                                  nn.Linear(1000, mask.shape[0]),
+                                  nn.Tanh())
 
     def forward(self, x):
         x = x.reshape(x.shape[0], -1)
@@ -81,7 +82,7 @@ class RealNVP(nn.Module):
         t = self.net_t(self.mask * x)
         s = self.net_s(self.mask * x)
         y = self.mask * x + (1 - self.mask) * (x * torch.exp(s) + t)
-        log_det_j = torch.sum((1 - self.mask) * s)
+        log_det_j = torch.sum(self.mask * s)
         return y, log_det_j
 
     def inverse(self, y):
@@ -97,12 +98,12 @@ class RealNVP(nn.Module):
         t = self.net_t(self.mask * y)
         s = self.net_s(self.mask * y)
         x = self.mask * y + (1 - self.mask) * ((y - t) * torch.exp(-s))
-        log_det_inv_j = torch.sum((1 - self.mask) * (-s))
+        log_det_inv_j = torch.sum(self.mask * (-s))
         return x, log_det_inv_j
     
     def log_prob(self, y):
         y = y.reshape(y.shape[0], -1)
-        x, log_det_inv_j = self.inverse(y)
+        x, log_det_inv_j = self.forward(y)
         log_p_x = self.base_dist.log_prob(x)
         # print(log_p_x, log_det_inv_j)
         return log_p_x + log_det_inv_j
