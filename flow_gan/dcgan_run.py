@@ -13,11 +13,13 @@ import torchvision.transforms as transforms
 import torchvision.utils as vutils
 import torch.utils.data as data
 import util
+import logging
 
 from models import RealNVP, RealNVPLoss
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 
 
+"""done"""
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', required=True, help='cifar10 | lsun | mnist |imagenet | folder | lfw | fake')
 parser.add_argument('--dataroot', required=False, help='path to dataset')
@@ -27,7 +29,7 @@ parser.add_argument('--imageSize', type=int, default=64, help='the height / widt
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=28)
 parser.add_argument('--ndf', type=int, default=28)
-parser.add_argument('--niter', type=int, default=25, help='number of epochs to train for')
+parser.add_argument('--niter', type=int, default=50, help='number of epochs to train for')
 parser.add_argument('--lr', type=float, default=0.0002, help='learning rate, default=0.0002')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
@@ -57,7 +59,7 @@ cudnn.benchmark = True
 
 if torch.cuda.is_available() and not opt.cuda:
     print("WARNING: You have a CUDA device, so you should probably run with --cuda")
-  
+
 if opt.dataroot is None and str(opt.dataset).lower() != 'fake':
     raise ValueError("`dataroot` parameter is required for dataset \"%s\"" % opt.dataset)
 
@@ -207,6 +209,7 @@ if opt.netD != '':
 print(netD)
 
 criterion = nn.BCELoss()
+loss_fn = RealNVPLoss()
 
 fixed_noise = torch.randn(opt.batchSize, nz, 1, 1, device=device)
 real_label = 1
@@ -219,65 +222,92 @@ optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 if opt.dry_run:
     opt.niter = 1
 
+logger = logging.getLogger('logger')
+hdlr = logging.FileHandler('./flow_gan.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+hdlr.setFormatter(formatter)
+logger.addHandler(hdlr)
+logger.setLevel(logging.INFO)
+
 for epoch in range(opt.niter):
-    for i, data in enumerate(dataloader, 0):
-        ############################
-        # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
-        ###########################
-        # train with real
-        netD.zero_grad()
-        real_cpu = data[0].to(device)
-        batch_size = real_cpu.size(0)
-        label = torch.full((batch_size,), real_label,
-                           dtype=real_cpu.dtype, device=device)
-        # print(real_cpu.shape)
-        output = netD(real_cpu)
-        errD_real = criterion(output, label)
-        errD_real.backward()
-        D_x = output.mean().item()
+    loss_d = util.AverageMeter()
+    loss_g = util.AverageMeter()
+#     Dx = util.AverageMeter()
+#     DGz1 = util.AverageMeter()
+#     DGz2 = util.AverageMeter()
+    likelihoods = util.AverageMeter()
+    with tqdm(total=len(dataloader.dataset)) as pbar:
+        for i, data in enumerate(dataloader):
+            ############################
+            # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
+            ###########################
+            # train with real
+            netD.zero_grad()
+            real_cpu = data[0].to(device)
+            batch_size = real_cpu.size(0)
+            label = torch.full((batch_size,), real_label,
+                               dtype=real_cpu.dtype, device=device)
+            # print(real_cpu.shape)
+            output = netD(real_cpu)
+            errD_real = criterion(output, label)
+            errD_real.backward()
+            D_x = output.mean().item()
 
-        # train with fake
-        # noise = torch.randn(batch_size, nz, 1, 1, device=device)
-        # fake = netG(noise)
-        z = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device=device)
-        x, _ = netG(z, reverse=True)
-        fake = torch.sigmoid(x)
-        label.fill_(fake_label)
-        output = netD(fake.detach())
-        errD_fake = criterion(output, label)
-        errD_fake.backward()
-        D_G_z1 = output.mean().item()
-        errD = errD_real + errD_fake
-        optimizerD.step()
-
-        ############################
-        # (2) Update G network: maximize log(D(G(z)))
-        ###########################
-        netG.zero_grad()
-        label.fill_(real_label)  # fake labels are real for generator cost
-        output = netD(fake)
-        errG = criterion(output, label)
-        errG.backward()
-        D_G_z2 = output.mean().item()
-        optimizerG.step()
-
-        print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
-              % (epoch, opt.niter, i, len(dataloader),
-                 errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-        if i % 100 == 0:
-            vutils.save_image(real_cpu,
-                    '%s/real_samples.png' % opt.outf,
-                    normalize=True)
-            # fake = netG(fixed_noise)
+            # train with fake
+            # noise = torch.randn(batch_size, nz, 1, 1, device=device)
+            # fake = netG(noise)
             z = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device=device)
             x, _ = netG(z, reverse=True)
             fake = torch.sigmoid(x)
-            vutils.save_image(fake.detach(),
+            label.fill_(fake_label)
+            output = netD(fake.detach())
+            errD_fake = criterion(output, label)
+            errD_fake.backward()
+            D_G_z1 = output.mean().item()
+            errD = errD_real + errD_fake
+            optimizerD.step()
+
+            ############################
+            # (2) Update G network: maximize log(D(G(z)))
+            ###########################
+            netG.zero_grad()
+            label.fill_(real_label)  # fake labels are real for generator cost
+            output = netD(fake)
+            errG = criterion(output, label)
+            errG.backward()
+            D_G_z2 = output.mean().item()
+            optimizerG.step()
+            
+            # compute likelihood
+            with torch.no_grad():
+                z, _ = netG(data[0].to(device), reverse=False)
+                likelihood = -loss_fn(z, 0)
+            
+            loss_d.update(errD.item(), data[0].size(0))
+            loss_g.update(errG.item(), data[0].size(0))
+            likelihoods.update(likelihood, data[0].size(0))
+
+            pbar.set_postfix(epoch=epoch,
+                             batch=i, 
+                             errD=errD.item(),
+                             errG=errG.item(),
+                             likelihood=likelihood)
+            pbar.update(batch_size)
+
+    logger.info(f'epoch: {epoch}, Loss_D: {loss_d.avg}, Loss_G: {loss_g.avg}, likelihood: {likelihoods.avg}')
+    vutils.save_image(real_cpu,
+                    '%s/real_samples.png' % opt.outf,
+                    normalize=True)
+            # fake = netG(fixed_noise)
+    z = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device=device)
+    x, _ = netG(z, reverse=True)
+    fake = torch.sigmoid(x)
+    vutils.save_image(fake.detach(),
                     '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
                     normalize=True)
 
-        if opt.dry_run:
-            break
+#        if opt.dry_run:
+#            break
     # do checkpointing
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
     torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
