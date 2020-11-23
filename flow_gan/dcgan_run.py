@@ -166,7 +166,7 @@ netG = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8).to(de
 # netG.apply(weights_init)
 if opt.netG != '':
     netG.load_state_dict(torch.load(opt.netG))
-print(netG)
+# print(netG)
 
 
 class Discriminator(nn.Module):
@@ -206,7 +206,7 @@ netD = Discriminator(ngpu).to(device)
 netD.apply(weights_init)
 if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
-print(netD)
+# print(netD)
 
 criterion = nn.BCELoss()
 loss_fn = RealNVPLoss()
@@ -223,7 +223,7 @@ if opt.dry_run:
     opt.niter = 1
 
 logger = logging.getLogger('logger')
-hdlr = logging.FileHandler('./flow_gan.log')
+hdlr = logging.FileHandler('./flow_gan_hybrid.log')
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 hdlr.setFormatter(formatter)
 logger.addHandler(hdlr)
@@ -274,14 +274,17 @@ for epoch in range(opt.niter):
             label.fill_(real_label)  # fake labels are real for generator cost
             output = netD(fake)
             errG = criterion(output, label)
-            errG.backward()
+            z, sldj = netG(data[0].to(device), reverse=False)
+            likelihood = loss_fn(z, sldj)
+            hybrid = errG + likelihood
+            hybrid.backward()
             D_G_z2 = output.mean().item()
             optimizerG.step()
             
             # compute likelihood
-            with torch.no_grad():
-                z, _ = netG(data[0].to(device), reverse=False)
-                likelihood = -loss_fn(z, 0)
+#             with torch.no_grad():
+#                 z, sldj = netG(data[0].to(device), reverse=False)
+#                 likelihood = -loss_fn(z, sldj)
             
             loss_d.update(errD.item(), data[0].size(0))
             loss_g.update(errG.item(), data[0].size(0))

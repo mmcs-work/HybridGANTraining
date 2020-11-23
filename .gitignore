@@ -2,5 +2,6 @@ data
 __pycache__
 .idea
 .ipynb_checkpoints
-samples
+*.png
 *.log
+samples
