@@ -4,6 +4,3 @@ __pycache__
 .ipynb_checkpoints
 *.png
 *.log
-samples
-samples_hybrid
-

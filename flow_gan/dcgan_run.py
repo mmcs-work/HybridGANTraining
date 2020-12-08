@@ -17,6 +17,7 @@ import logging
 
 from models import RealNVP, RealNVPLoss
 from tqdm.autonotebook import tqdm
+import torchvision
 
 
 """done"""
@@ -40,6 +41,13 @@ parser.add_argument('--netD', default='', help="path to netD (to continue traini
 parser.add_argument('--outf', default='.', help='folder to output images and model checkpoints')
 parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('--classes', default='bedroom', help='comma separated list of classes for the lsun data set')
+parser.add_argument('--log_path', default='./flow_gan.log', help='path to store the log file')
+parser.add_argument('--start_epoch', type=int, default=0, help='continue training')
+#######################################################################################
+parser.add_argument('--generate', type=int, default=0, help='generate images')
+parser.add_argument('--generate_loc', default='', help='location of generate images')
+parser.add_argument('--generate_img_nums', type=int, default=100, help='Number of images to generate')
+#######################################################################################
 
 opt = parser.parse_args()
 print(opt)
@@ -166,6 +174,27 @@ netG = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8).to(de
 # netG.apply(weights_init)
 if opt.netG != '':
     netG.load_state_dict(torch.load(opt.netG))
+########################################################################
+if opt.generate == 1:
+    batch_size = opt.generate_img_nums
+    index = 0
+    num_of_times = int(batch_size / 64) + int((batch_size % 64) > 0) 
+    
+    for i in tqdm(range(num_of_times)):
+        z = torch.randn((64, 1, 28, 28), dtype=torch.float32).to(device)
+        x, _ = netG(z, reverse=True)
+        fake = torch.sigmoid(x)
+        fake = fake.detach()
+        for i in range(fake.shape[0]):
+            img = fake[i, :, :, :]
+            img = torchvision.transforms.ToPILImage()(img)
+            img.save(f'{opt.generate_loc}/img_{index}.png')
+            index = index + 1
+
+        
+    import sys
+    sys.exit()
+########################################################################
 # print(netG)
 
 
@@ -223,13 +252,17 @@ if opt.dry_run:
     opt.niter = 1
 
 logger = logging.getLogger('logger')
-hdlr = logging.FileHandler('./flow_gan_hybrid.log')
+hdlr = logging.FileHandler(opt.log_path)
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 hdlr.setFormatter(formatter)
 logger.addHandler(hdlr)
 logger.setLevel(logging.INFO)
 
-for epoch in range(opt.niter):
+alpha = 1.01
+
+for epoch in range(opt.start_epoch, opt.niter):
+    alpha -= 0.01
+        
     loss_d = util.AverageMeter()
     loss_g = util.AverageMeter()
 #     Dx = util.AverageMeter()
@@ -276,7 +309,7 @@ for epoch in range(opt.niter):
             errG = criterion(output, label)
             z, sldj = netG(data[0].to(device), reverse=False)
             likelihood = loss_fn(z, sldj)
-            hybrid = errG + likelihood
+            hybrid = alpha * errG + (1 - alpha) * likelihood
             hybrid.backward()
             D_G_z2 = output.mean().item()
             optimizerG.step()
@@ -314,3 +347,4 @@ for epoch in range(opt.niter):
     # do checkpointing
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
     torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
+    
