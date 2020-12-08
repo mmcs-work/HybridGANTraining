@@ -1,6 +1,9 @@
-data
 __pycache__
 .idea
 .ipynb_checkpoints
 *.png
 *.log
+*.pth
+*.tar
+*.pt
+data
