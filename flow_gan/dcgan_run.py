@@ -96,14 +96,14 @@ elif opt.dataset == 'cifar10':
                            transform=transforms.Compose([
                                transforms.Resize(opt.imageSize),
                                transforms.ToTensor(),
-                               transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+#                                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                            ]))
     nc=3
 
 elif opt.dataset == 'mnist':
         dataset = dset.MNIST(root=opt.dataroot, download=True,
                            transform=transforms.Compose([
-                              #  transforms.Resize(opt.imageSize),
+                               transforms.Resize(opt.imageSize),
                                transforms.ToTensor(),
                               #  transforms.Normalize((0.5,), (0.5,)),
                            ]))
@@ -170,7 +170,8 @@ class Generator(nn.Module):
         return output
 
 
-netG = RealNVP(num_scales=2, in_channels=1, mid_channels=64, num_blocks=8).to(device)
+netG = RealNVP(num_scales=2, in_channels=nc, mid_channels=64, num_blocks=8).to(device)
+# netG = Generator(ngpu).to(device)
 # netG.apply(weights_init)
 if opt.netG != '':
     netG.load_state_dict(torch.load(opt.netG))
@@ -204,6 +205,7 @@ class Discriminator(nn.Module):
         self.ngpu = ngpu
         self.main = nn.Sequential(
             # input is (nc) x 64 x 64
+            nn.ReLU(),
             nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 32 x 32
@@ -219,7 +221,7 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False),
+            nn.Conv2d(ndf * 8, 1, 2, 1, 0, bias=False),
             nn.Sigmoid()
         )
 
@@ -231,6 +233,8 @@ class Discriminator(nn.Module):
 
         return output.view(-1, 1).squeeze(1)
 
+
+
 netD = Discriminator(ngpu).to(device)
 netD.apply(weights_init)
 if opt.netD != '':
@@ -240,7 +244,7 @@ if opt.netD != '':
 criterion = nn.BCELoss()
 loss_fn = RealNVPLoss()
 
-fixed_noise = torch.randn(opt.batchSize, nz, 1, 1, device=device)
+fixed_noise = torch.randn((opt.batchSize, nc, opt.imageSize, opt.imageSize), dtype=torch.float32, device=device)
 real_label = 1
 fake_label = 0
 
@@ -258,10 +262,10 @@ hdlr.setFormatter(formatter)
 logger.addHandler(hdlr)
 logger.setLevel(logging.INFO)
 
-alpha = 1.01
+alpha = 1.0
 
 for epoch in range(opt.start_epoch, opt.niter):
-    alpha -= 0.01
+#     alpha -= 0.01
         
     loss_d = util.AverageMeter()
     loss_g = util.AverageMeter()
@@ -289,7 +293,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             # train with fake
             # noise = torch.randn(batch_size, nz, 1, 1, device=device)
             # fake = netG(noise)
-            z = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device=device)
+            z = torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32, device=device)
             x, _ = netG(z, reverse=True)
             fake = torch.sigmoid(x)
             label.fill_(fake_label)
@@ -335,8 +339,7 @@ for epoch in range(opt.start_epoch, opt.niter):
                     '%s/real_samples.png' % opt.outf,
                     normalize=True)
             # fake = netG(fixed_noise)
-    z = torch.randn((batch_size, 1, 28, 28), dtype=torch.float32, device=device)
-    x, _ = netG(z, reverse=True)
+    x, _ = netG(fixed_noise, reverse=True)
     fake = torch.sigmoid(x)
     vutils.save_image(fake.detach(),
                     '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
