@@ -339,7 +339,9 @@ for epoch in range(opt.start_epoch, opt.niter):
             errG = criterion(output, label)
             z, sldj = netG(data.to(device), reverse=False)
             likelihood = loss_fn(z, sldj)
-            hybrid = errG / 20 + likelihood
+            ###### Changing the loss to likelihood only.
+            #hybrid = errG / 20 + likelihood
+            hybrid = likelihood
             hybrid.backward()
             D_G_z2 = output.mean().item()
             optimizerG.step()
