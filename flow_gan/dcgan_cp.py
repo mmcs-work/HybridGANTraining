@@ -49,6 +49,7 @@ parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('--classes', default='bedroom', help='comma separated list of classes for the lsun data set')
 parser.add_argument('--log_path', default='./flow_gan.log', help='path to store the log file')
 parser.add_argument('--start_epoch', type=int, default=0, help='continue training')
+parser.add_argument('--root_dir', type=str, help='load self-generated imgs')
 #######################################################################################
 parser.add_argument('--generate', type=int, default=0, help='generate images')
 parser.add_argument('--generate_loc', default='', help='location of generate images')
@@ -77,7 +78,8 @@ if opt.dataroot is None and str(opt.dataset).lower() != 'fake':
     raise ValueError("`dataroot` parameter is required for dataset \"%s\"" % opt.dataset)
 
 
-root_dir="/nfs/students/winter-term-2020/project-5/project-5-manna/flow_gan/GAANDataGenforFlow"
+# root_dir="/nfs/students/winter-term-2020/project-5/project-5-manna/flow_gan/GAANDataGenforFlow"
+root_dir = opt.root_dir
 def my_dataloader(nc, transform):
     
     lst = os.listdir(root_dir)
