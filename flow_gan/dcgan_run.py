@@ -48,6 +48,7 @@ parser.add_argument('--generate', type=int, default=0, help='generate images')
 parser.add_argument('--generate_loc', default='', help='location of generate images')
 parser.add_argument('--generate_img_nums', type=int, default=100, help='Number of images to generate')
 #######################################################################################
+parser.add_argument('--likelihood', type=int, default=0, help='calculate likelihood')
 
 opt = parser.parse_args()
 print(opt)
@@ -263,7 +264,29 @@ logger.addHandler(hdlr)
 logger.setLevel(logging.INFO)
 
 alpha = 1.0
-
+#################################
+if opt.likelihood == 1:
+    dataloader = my_dataloader(nc, transform=transforms.Compose([transforms.Resize(opt.imageSize), 
+                                                         transforms.ToTensor()]))
+    likelihoods = util.AverageMeter()
+    with tqdm(total=len(os.listdir(root_dir))) as pbar:
+        for i, data in enumerate(dataloader):
+            z, sldj = netG(data.to(device), reverse=False)
+            likelihood = loss_fn(z, sldj)
+            ###### Changing the loss to likelihood only.
+            #hybrid = errG / 20 + likelihood
+            
+            # compute likelihood
+#             with torch.no_grad():
+#                 z, sldj = netG(data[0].to(device), reverse=False)
+#                 likelihood = -loss_fn(z, sldj)
+            
+            likelihoods.update(likelihood, data[0].size(0))
+        print(f'likelihood: {likelihoods.avg}')
+    
+    import sys
+    sys.exit()       
+#################################
 for epoch in range(opt.start_epoch, opt.niter):
 #     alpha -= 0.01
         
