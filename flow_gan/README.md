@@ -2,7 +2,7 @@
 Pure flowgan GAN training on cifar10 dataset
 
 ## flowgan_for_flow_likelihood  
-Pure flowgan likelihood training, based on pretrained GAN-loss model and GAN-model generated images
+Pure flowgan likelihood training, based on flowgan(GAN loss) generated images
 
 ## GAN_for_flow  
 Flowgan hybrid training, based on DCGAN generated images
