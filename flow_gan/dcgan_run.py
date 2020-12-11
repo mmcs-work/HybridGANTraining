@@ -14,11 +14,12 @@ import torchvision.utils as vutils
 import torch.utils.data as data
 import util
 import logging
+import numpy as np
 
 from models import RealNVP, RealNVPLoss
 from tqdm.autonotebook import tqdm
 import torchvision
-
+from PIL import Image
 
 """done"""
 parser = argparse.ArgumentParser()
@@ -43,6 +44,7 @@ parser.add_argument('--manualSeed', type=int, help='manual seed')
 parser.add_argument('--classes', default='bedroom', help='comma separated list of classes for the lsun data set')
 parser.add_argument('--log_path', default='./flow_gan.log', help='path to store the log file')
 parser.add_argument('--start_epoch', type=int, default=0, help='continue training')
+parser.add_argument('--root_dir', type=str, help='load self-generated imgs')
 #######################################################################################
 parser.add_argument('--generate', type=int, default=0, help='generate images')
 parser.add_argument('--generate_loc', default='', help='location of generate images')
@@ -72,6 +74,22 @@ if torch.cuda.is_available() and not opt.cuda:
 if opt.dataroot is None and str(opt.dataset).lower() != 'fake':
     raise ValueError("`dataroot` parameter is required for dataset \"%s\"" % opt.dataset)
 
+root_dir = opt.root_dir
+def my_dataloader(nc, transform):
+    
+    lst = os.listdir(root_dir)
+    imgs = []
+    for n in range(len(lst)):
+        img = transform(Image.open(os.path.join(root_dir, lst[n])))
+        img = img.unsqueeze(0)
+        imgs.append(img)
+
+        if len(imgs) == opt.batchSize or n == len(lst):
+            batch = torch.cat(imgs, dim = 0)
+            assert batch.shape != [opt.batchSize, nc, opt.imageSize, opt.imageSize]
+            imgs = []
+            yield batch
+            
 if opt.dataset in ['imagenet', 'folder', 'lfw']:
     # folder dataset
     dataset = dset.ImageFolder(root=opt.dataroot,
@@ -116,9 +134,11 @@ elif opt.dataset == 'fake':
     nc=3
 
 assert dataset
+
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                          shuffle=True, num_workers=int(opt.workers))
-
+#dataloader = my_dataloader(nc, transform=transforms.Compose([transforms.Resize(opt.imageSize), 
+#                                                     transforms.ToTensor()]))
 device = torch.device("cuda:0" if opt.cuda else "cpu")
 ngpu = int(opt.ngpu)
 nz = int(opt.nz)
@@ -182,16 +202,17 @@ if opt.generate == 1:
     index = 0
     num_of_times = int(batch_size / 64) + int((batch_size % 64) > 0) 
     
-    for i in tqdm(range(num_of_times)):
-        z = torch.randn((64, 1, 28, 28), dtype=torch.float32).to(device)
-        x, _ = netG(z, reverse=True)
-        fake = torch.sigmoid(x)
-        fake = fake.detach()
-        for i in range(fake.shape[0]):
-            img = fake[i, :, :, :]
-            img = torchvision.transforms.ToPILImage()(img)
-            img.save(f'{opt.generate_loc}/img_{index}.png')
-            index = index + 1
+    with torch.no_grad():
+        for i in tqdm(range(num_of_times)):
+            z = torch.randn((64, 1, 28, 28), dtype=torch.float32).to(device)
+            x, _ = netG(z, reverse=True)
+            fake = torch.sigmoid(x)
+            fake = fake.detach()
+            for i in range(fake.shape[0]):
+                img = fake[i, :, :, :]
+                img = torchvision.transforms.ToPILImage()(img)
+                img.save(f'{opt.generate_loc}/img_{index}.png')
+                index = index + 1
 
         
     import sys
@@ -201,23 +222,24 @@ if opt.generate == 1:
 #################################
 if opt.likelihood == 1:
     dataloader = my_dataloader(nc, transform=transforms.Compose([transforms.Resize(opt.imageSize), 
-                                                         transforms.ToTensor()]))
+                                                    transforms.ToTensor()]))
     likelihoods = util.AverageMeter()
+    loss_fn = RealNVPLoss()
+    #logll = []
     with tqdm(total=len(os.listdir(root_dir))) as pbar:
         for i, data in enumerate(dataloader):
-            z, sldj = netG(data.to(device), reverse=False)
+            netG.zero_grad()
+            #print(data.shape)
+            data = data.to(device)
+            z, sldj = netG(data, reverse=False)
             likelihood = loss_fn(z, sldj)
-            ###### Changing the loss to likelihood only.
-            #hybrid = errG / 20 + likelihood
-            
-            # compute likelihood
-#             with torch.no_grad():
-#                 z, sldj = netG(data[0].to(device), reverse=False)
-#                 likelihood = -loss_fn(z, sldj)
-            
-            likelihoods.update(likelihood, data[0].size(0))
-        print(f'likelihood: {likelihoods.avg}')
-    
+            #print(likelihood)
+            #logll.append(-likelihood.item())
+            likelihoods.update(likelihood.item(), data[0].size(0))
+            #print("---")
+            pbar.update(opt.batchSize)
+    print(likelihoods.avg)
+    #print(np.mean(np.array(logll)))
     import sys
     sys.exit()       
 #################################
