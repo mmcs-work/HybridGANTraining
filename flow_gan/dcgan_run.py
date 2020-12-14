@@ -201,19 +201,28 @@ if opt.generate == 1:
     batch_size = opt.generate_img_nums
     index = 0
     num_of_times = int(batch_size / 64) + int((batch_size % 64) > 0) 
-    
+    likelihoods = util.AverageMeter()
+    loss_fn = RealNVPLoss()
     with torch.no_grad():
         for i in tqdm(range(num_of_times)):
             z = torch.randn((64, 1, 28, 28), dtype=torch.float32).to(device)
             x, _ = netG(z, reverse=True)
+            
             fake = torch.sigmoid(x)
+            z, sldj = netG(fake, reverse=False)
+            likelihood = loss_fn(z, sldj)
+            likelihoods.update(likelihood.item(), fake[0].size(0))
+            print("bpd\n")
+            print(util.bits_per_dim(x, likelihoods.avg))
+            print("\n")
             fake = fake.detach()
             for i in range(fake.shape[0]):
                 img = fake[i, :, :, :]
                 img = torchvision.transforms.ToPILImage()(img)
                 img.save(f'{opt.generate_loc}/img_{index}.png')
                 index = index + 1
-
+        print(likelihoods.avg)
+        
         
     import sys
     sys.exit()
@@ -266,7 +275,7 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf * 8, 1, 2, 1, 0, bias=False),
+            nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False),
             nn.Sigmoid()
         )
 
