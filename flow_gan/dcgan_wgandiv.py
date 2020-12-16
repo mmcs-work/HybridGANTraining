@@ -4,18 +4,15 @@ import argparse
 import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 import random
-import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import torchvision.datasets as dset
-import torchvision.transforms as transforms
 import torchvision.utils as vutils
 import torch.utils.data as data
 import util
 import logging
-import numpy as np
 
 from torch.utils.tensorboard import SummaryWriter
 writer = SummaryWriter()
@@ -24,17 +21,12 @@ writer = SummaryWriter()
 from models import RealNVP, RealNVPLoss
 from tqdm.autonotebook import tqdm
 import torchvision
-from torch.autograd import Variable
 from PIL import Image
 import torchvision.transforms as transforms
-from torchvision.utils import save_image
 
-from torch.utils.data import DataLoader
-from torchvision import datasets
 from torch.autograd import Variable
 
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.autograd as autograd
 import torch
 """done"""
@@ -105,7 +97,7 @@ def my_dataloader(nc, transform):
             assert batch.shape != [opt.batchSize, nc, opt.imageSize, opt.imageSize]
             imgs = []
             yield batch
-            
+
 if opt.dataset in ['imagenet', 'folder', 'lfw']:
     # folder dataset
     dataset = dset.ImageFolder(root=opt.dataroot,
@@ -116,16 +108,6 @@ if opt.dataset in ['imagenet', 'folder', 'lfw']:
                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                                ]))
     nc=3
-elif opt.dataset == 'lsun':
-    classes = [ c + '_train' for c in opt.classes.split(',')]
-    dataset = dset.LSUN(root=opt.dataroot, classes=classes,
-                        transform=transforms.Compose([
-                            transforms.Resize(opt.imageSize),
-                            transforms.CenterCrop(opt.imageSize),
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                        ]))
-    nc=3
 elif opt.dataset == 'cifar10':
     dataset = dset.CIFAR10(root=opt.dataroot, download=True,
                            transform=transforms.Compose([
@@ -134,16 +116,21 @@ elif opt.dataset == 'cifar10':
 #                                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                            ]))
     nc=3
-
 elif opt.dataset == 'mnist':
-        dataset = dset.MNIST(root=opt.dataroot, download=True,
+    dataset = dset.MNIST(root=opt.dataroot, download=True, train=True,
                            transform=transforms.Compose([
                                transforms.Resize(opt.imageSize),
                                transforms.ToTensor(),
                               #  transforms.Normalize((0.5,), (0.5,)),
                            ]))
-        nc=1
-        #dataset, _ = torch.utils.data.random_split(dataset, [500, 59500])
+    nc=1
+    test_dataset = dset.MNIST(root=opt.dataroot, download=True,train = False,
+                           transform=transforms.Compose([
+                               transforms.Resize(opt.imageSize),
+                               transforms.ToTensor(),
+                              #  transforms.Normalize((0.5,), (0.5,)),
+                           ]))
+    dataset, val_dataset = torch.utils.data.random_split(dataset, [50000, 10000])
 
 elif opt.dataset == 'fake':
     dataset = dset.FakeData(image_size=(3, opt.imageSize, opt.imageSize),
@@ -154,6 +141,12 @@ assert dataset
 
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                          shuffle=True, num_workers=int(opt.workers))
+
+val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=opt.batchSize,
+                                         shuffle=True, num_workers=int(opt.workers))
+test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=opt.batchSize,
+                                         shuffle=True, num_workers=int(opt.workers))
+
 #dataloader = my_dataloader(nc, transform=transforms.Compose([transforms.Resize(opt.imageSize), 
 #                                                     transforms.ToTensor()]))
 device = torch.device("cuda:0" if opt.cuda else "cpu")
@@ -161,6 +154,8 @@ ngpu = int(opt.ngpu)
 nz = int(opt.nz)
 ngf = int(opt.ngf)
 ndf = int(opt.ndf)
+# Used in wgan loss
+# TODO: Use proper names
 p = 6
 k = 2
 cuda = torch.cuda.is_available()
@@ -311,7 +306,6 @@ netD = Discriminator(ngpu).to(device)
 netD.apply(weights_init)
 if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
-# print(netD)
 
 criterion = nn.BCELoss()
 loss_fn = RealNVPLoss()
@@ -335,7 +329,8 @@ logger.addHandler(hdlr)
 logger.setLevel(logging.INFO)
 
 alpha = 1.0
-
+best_val_nlli = 1e16
+best_model_counter = -1
 for epoch in range(opt.start_epoch, opt.niter):
 #     alpha -= 0.01
         
@@ -345,6 +340,7 @@ for epoch in range(opt.start_epoch, opt.niter):
 #     DGz1 = util.AverageMeter()
 #     DGz2 = util.AverageMeter()
     likelihoods = util.AverageMeter()
+    val_likelihoods = util.AverageMeter()
     with tqdm(total=len(dataloader.dataset)) as pbar:
         for i, data in enumerate(dataloader):
             ############################
@@ -426,14 +422,24 @@ for epoch in range(opt.start_epoch, opt.niter):
 #             loss_g.update(errG.item(), data[0].size(0))
             likelihoods.update(likelihood.item(), data[0].size(0))
 
+
             pbar.set_postfix(b=i, 
                              l=likelihood.item(),
                              al = likelihoods.avg,
                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
 
+    with tqdm(total=len(val_dataloader.dataset)) as pbar:
+        for i, data in enumerate(val_dataloader):
+            z, sldj = netG(data[0].to(device), reverse=False)
+            likelihood = loss_fn(z, sldj)
+            val_likelihoods.update(likelihood.item(), data[0].size(0))
+        if val_likelihoods.avg < best_val_nlli:
+            best_model_counter = epoch
+            best_val_nlli = val_likelihoods.avg
+
     #logger.info(f'epoch: {epoch}, Loss_D: {loss_d.avg}, Loss_G: {loss_g.avg}, likelihood: {likelihoods.avg}')
-    logger.info(f'epoch: {epoch}, likelihood: {likelihoods.avg}, bpd: {util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg)}')
+    logger.info(f'epoch: {epoch}, likelihood: {likelihoods.avg}, best_model_counter:{best_model_counter}bpd: {util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg)}')
     writer.add_scalar("Loss/likelihood",likelihoods.avg , epoch)
     writer.add_scalar("Loss/bpd",util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg) , epoch)
     vutils.save_image(real_cpu,
