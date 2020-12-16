@@ -2,25 +2,33 @@
 from __future__ import print_function
 import argparse
 import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 import random
-import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
 import torchvision.datasets as dset
-import torchvision.transforms as transforms
 import torchvision.utils as vutils
 import torch.utils.data as data
 import util
 import logging
-import numpy as np
+
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter()
+
 
 from models import RealNVP, RealNVPLoss
 from tqdm.autonotebook import tqdm
 import torchvision
 from PIL import Image
+import torchvision.transforms as transforms
 
+from torch.autograd import Variable
+
+import torch.nn as nn
+import torch.autograd as autograd
+import torch
 """done"""
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', required=True, help='cifar10 | lsun | mnist |imagenet | folder | lfw | fake')
@@ -89,7 +97,7 @@ def my_dataloader(nc, transform):
             assert batch.shape != [opt.batchSize, nc, opt.imageSize, opt.imageSize]
             imgs = []
             yield batch
-            
+
 if opt.dataset in ['imagenet', 'folder', 'lfw']:
     # folder dataset
     dataset = dset.ImageFolder(root=opt.dataroot,
@@ -100,16 +108,6 @@ if opt.dataset in ['imagenet', 'folder', 'lfw']:
                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                                ]))
     nc=3
-elif opt.dataset == 'lsun':
-    classes = [ c + '_train' for c in opt.classes.split(',')]
-    dataset = dset.LSUN(root=opt.dataroot, classes=classes,
-                        transform=transforms.Compose([
-                            transforms.Resize(opt.imageSize),
-                            transforms.CenterCrop(opt.imageSize),
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-                        ]))
-    nc=3
 elif opt.dataset == 'cifar10':
     dataset = dset.CIFAR10(root=opt.dataroot, download=True,
                            transform=transforms.Compose([
@@ -118,15 +116,22 @@ elif opt.dataset == 'cifar10':
 #                                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
                            ]))
     nc=3
-
 elif opt.dataset == 'mnist':
-        dataset = dset.MNIST(root=opt.dataroot, download=True,
+    dataset = dset.MNIST(root=opt.dataroot, download=True, train=True,
                            transform=transforms.Compose([
                                transforms.Resize(opt.imageSize),
                                transforms.ToTensor(),
                               #  transforms.Normalize((0.5,), (0.5,)),
                            ]))
-        nc=1
+    nc=1
+    test_dataset = dset.MNIST(root=opt.dataroot, download=True,train = False,
+                           transform=transforms.Compose([
+                               transforms.Resize(opt.imageSize),
+                               transforms.ToTensor(),
+                              #  transforms.Normalize((0.5,), (0.5,)),
+                           ]))
+    #dataset, val_dataset = torch.utils.data.random_split(dataset, [50000,10000])
+    dataset, val_dataset, _ = torch.utils.data.random_split(dataset, [1000,1000,58000])
 
 elif opt.dataset == 'fake':
     dataset = dset.FakeData(image_size=(3, opt.imageSize, opt.imageSize),
@@ -137,6 +142,12 @@ assert dataset
 
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batchSize,
                                          shuffle=True, num_workers=int(opt.workers))
+
+val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=opt.batchSize//2,
+                                         shuffle=True, num_workers=int(opt.workers))
+test_dataloader = torch.utils.data.DataLoader(test_dataset, batch_size=opt.batchSize,
+                                         shuffle=True, num_workers=int(opt.workers))
+
 #dataloader = my_dataloader(nc, transform=transforms.Compose([transforms.Resize(opt.imageSize), 
 #                                                     transforms.ToTensor()]))
 device = torch.device("cuda:0" if opt.cuda else "cpu")
@@ -144,8 +155,12 @@ ngpu = int(opt.ngpu)
 nz = int(opt.nz)
 ngf = int(opt.ngf)
 ndf = int(opt.ndf)
-
-
+# Used in wgan loss
+# TODO: Use proper names
+p = 6
+k = 2
+cuda = torch.cuda.is_available()
+Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 # custom weights initialization called on netG and netD
 def weights_init(m):
     classname = m.__class__.__name__
@@ -275,8 +290,7 @@ class Discriminator(nn.Module):
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False),
-            nn.Sigmoid()
+            nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False)
         )
 
     def forward(self, input):
@@ -293,7 +307,6 @@ netD = Discriminator(ngpu).to(device)
 netD.apply(weights_init)
 if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
-# print(netD)
 
 criterion = nn.BCELoss()
 loss_fn = RealNVPLoss()
@@ -317,16 +330,19 @@ logger.addHandler(hdlr)
 logger.setLevel(logging.INFO)
 
 alpha = 1.0
-
+best_val_nlli = 1e16
+best_model_counter = -1
 for epoch in range(opt.start_epoch, opt.niter):
 #     alpha -= 0.01
         
-    loss_d = util.AverageMeter()
-    loss_g = util.AverageMeter()
+#     loss_d = util.AverageMeter()
+#     loss_g = util.AverageMeter()
 #     Dx = util.AverageMeter()
 #     DGz1 = util.AverageMeter()
 #     DGz2 = util.AverageMeter()
     likelihoods = util.AverageMeter()
+    val_likelihoods = util.AverageMeter()
+    netG.train()
     with tqdm(total=len(dataloader.dataset)) as pbar:
         for i, data in enumerate(dataloader):
             ############################
@@ -335,39 +351,70 @@ for epoch in range(opt.start_epoch, opt.niter):
             # train with real
             netD.zero_grad()
             real_cpu = data[0].to(device)
+            real_imgs = Variable(real_cpu.type(Tensor), requires_grad=True)
             batch_size = real_cpu.size(0)
             label = torch.full((batch_size,), real_label,
                                dtype=real_cpu.dtype, device=device)
             # print(real_cpu.shape)
-            output = netD(real_cpu)
-            errD_real = criterion(output, label)
-            errD_real.backward()
-            D_x = output.mean().item()
-
+            output_real = netD(real_imgs)
+#             print(output_real.shape)
+#             print(real_cpu.size(0))
+            #errD_real = criterion(output_real, label)
+#             errD_real.backward()
+#             D_x = output_real.mean().item()
+            
             # train with fake
             # noise = torch.randn(batch_size, nz, 1, 1, device=device)
             # fake = netG(noise)
-            z = torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32, device=device)
+            z = Variable(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32, device=device))
             x, _ = netG(z, reverse=True)
             fake = torch.sigmoid(x)
             label.fill_(fake_label)
-            output = netD(fake.detach())
-            errD_fake = criterion(output, label)
-            errD_fake.backward()
-            D_G_z1 = output.mean().item()
-            errD = errD_real + errD_fake
-            optimizerD.step()
+            #output_fake = netD(fake.detach())
+            output_fake = netD(x)
+            #errD_fake = criterion(output, label)
+#             errD_fake.backward()
+#             D_G_z1 = output.mean().item()
+            #errD = errD_real + errD_fake
+#             optimizerD.step()
+            
+            #######################################
+            real_grad_out = Variable(Tensor(real_cpu.size(0), 1).fill_(1.0), requires_grad=False)
+            real_grad = autograd.grad(
+            output_real.unsqueeze(1), real_imgs, real_grad_out, create_graph=True, retain_graph=True, only_inputs=True
+        )[0]
+            real_grad_norm = real_grad.view(real_grad.size(0), -1).pow(2).sum(1) ** (p / 2)
 
+            fake_grad_out = Variable(Tensor(fake.size(0), 1).fill_(1.0), requires_grad=False)
+            fake_grad = autograd.grad(
+            output_fake.unsqueeze(1), x, fake_grad_out, create_graph=True, retain_graph=True, only_inputs=True
+        )[0]
+            fake_grad_norm = fake_grad.view(fake_grad.size(0), -1).pow(2).sum(1) ** (p / 2)
+
+            div_gp = torch.mean(real_grad_norm + fake_grad_norm) * k / 2
+
+            # Adversarial loss
+            d_loss = -torch.mean(output_real) + torch.mean(output_fake) + 0.5 * div_gp
+            #######################################
+            d_loss.backward(retain_graph=True)
+            optimizerD.step()
+            
+            del d_loss, div_gp, fake_grad_norm,fake_grad,fake_grad_out,real_grad_norm, real_grad ,output_fake
             ############################
             # (2) Update G network: maximize log(D(G(z)))
             ###########################
             netG.zero_grad()
             label.fill_(real_label)  # fake labels are real for generator cost
-            output = netD(fake)
-            errG = criterion(output, label)
-            z, sldj = netG(data[0].to(device), reverse=False)
+            #output = netD(fake)
+            output = netD(real_imgs)
+            #print("---------------")
+            #printf(output.size())
+            #pp = output.squeeze()
+            errG = criterion(nn.Sigmoid()(output), label)
+            #z, sldj = netG(data[0].to(device), reverse=False)
+            z, sldj = netG(real_imgs, reverse=False)
             likelihood = loss_fn(z, sldj)
-            hybrid = alpha * errG + (1 - alpha) * likelihood
+            hybrid =  errG /20  +  likelihood
             hybrid.backward()
             D_G_z2 = output.mean().item()
             optimizerG.step()
@@ -377,31 +424,57 @@ for epoch in range(opt.start_epoch, opt.niter):
 #                 z, sldj = netG(data[0].to(device), reverse=False)
 #                 likelihood = -loss_fn(z, sldj)
             
-            loss_d.update(errD.item(), data[0].size(0))
-            loss_g.update(errG.item(), data[0].size(0))
-            likelihoods.update(likelihood, data[0].size(0))
+#             loss_d.update(errD.item(), data[0].size(0))
+#             loss_g.update(errG.item(), data[0].size(0))
+            likelihoods.update(likelihood.item(), data[0].size(0))
 
-            pbar.set_postfix(epoch=epoch,
-                             batch=i, 
-                             errD=errD.item(),
-                             errG=errG.item(),
-                             likelihood=likelihood)
+             
+            pbar.set_postfix(b=i, 
+                             l=likelihood.item(),
+                             al = likelihoods.avg,
+                             bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
-
-    logger.info(f'epoch: {epoch}, Loss_D: {loss_d.avg}, Loss_G: {loss_g.avg}, likelihood: {likelihoods.avg}')
-    vutils.save_image(real_cpu,
-                    '%s/real_samples.png' % opt.outf,
-                    normalize=True)
+            
+            del real_cpu, real_imgs,label,z, x,fake, output, likelihood, hybrid, D_G_z2
+    with torch.no_grad():
+        with tqdm(total=len(val_dataloader.dataset)) as pbar:
+            for i, data in enumerate(val_dataloader):
+                z, sldj = netG(data[0].to(device), reverse=False)
+                likelihood = loss_fn(z, sldj)
+                val_likelihoods.update(likelihood.item(), data[0].size(0))
+                #print(likelihood)
+                pbar.set_postfix(b=i, 
+                                 l=likelihood.item(),
+                                 val = val_likelihoods.avg,
+                                 bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), val_likelihoods.avg))
+                pbar.update(batch_size)
+    if val_likelihoods.avg < best_val_nlli:
+        best_model_counter = epoch
+        best_val_nlli = val_likelihoods.avg
+    #logger.info(f'epoch: {epoch}, Loss_D: {loss_d.avg}, Loss_G: {loss_g.avg}, likelihood: {likelihoods.avg}')
+    logger.info(f'epoch: {epoch}, likelihood: {likelihoods.avg}, best_model_counter:{best_model_counter}bpd: {util.bits_per_dim(torch.zeros((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.int8), likelihoods.avg)}')
+    writer.add_scalar("Loss/likelihood",likelihoods.avg , epoch)
+    writer.add_scalar("Loss/bpd",util.bits_per_dim(torch.zeros((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.int8), likelihoods.avg) , epoch)
+#     vutils.save_image(real_cpu,
+#                     '%s/real_samples.png' % opt.outf,
+#                     normalize=True)
             # fake = netG(fixed_noise)
+    netG.eval()
     x, _ = netG(fixed_noise, reverse=True)
+    x = torch.sigmoid(x)
+    z, sldj = netG(x, reverse=False)
+    likelihoodgen = loss_fn(fixed_noise, sldj)
+    logger.info(f'epoch: {epoch}, likelihoodgen: {likelihoodgen.item()}')
     fake = torch.sigmoid(x)
     vutils.save_image(fake.detach(),
                     '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
                     normalize=True)
-
+    del x,z,sldj,likelihoodgen,fake
+    
 #        if opt.dry_run:
 #            break
     # do checkpointing
+    writer.flush()
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
     torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
     
