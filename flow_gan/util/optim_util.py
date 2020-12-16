@@ -16,7 +16,7 @@ def bits_per_dim(x, nll):
     dim = np.prod(x.size()[1:])
     bpd = nll / (np.log(2) * dim)
 
-    return bpd
+    return bpd.item()
 
 
 def clip_grad_norm(optimizer, max_norm, norm_type=2):

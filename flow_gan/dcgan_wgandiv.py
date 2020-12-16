@@ -17,6 +17,10 @@ import util
 import logging
 import numpy as np
 
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter()
+
+
 from models import RealNVP, RealNVPLoss
 from tqdm.autonotebook import tqdm
 import torchvision
@@ -139,7 +143,7 @@ elif opt.dataset == 'mnist':
                               #  transforms.Normalize((0.5,), (0.5,)),
                            ]))
         nc=1
-        dataset, _ = torch.utils.data.random_split(dataset, [500, 59500])
+        #dataset, _ = torch.utils.data.random_split(dataset, [500, 59500])
 
 elif opt.dataset == 'fake':
     dataset = dset.FakeData(image_size=(3, opt.imageSize, opt.imageSize),
@@ -402,7 +406,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             netG.zero_grad()
             label.fill_(real_label)  # fake labels are real for generator cost
             output = netD(fake)
-            print("---------------")
+            #print("---------------")
             #printf(output.size())
             #pp = output.squeeze()
             errG = criterion(nn.Sigmoid()(output), label)
@@ -422,12 +426,16 @@ for epoch in range(opt.start_epoch, opt.niter):
 #             loss_g.update(errG.item(), data[0].size(0))
             likelihoods.update(likelihood, data[0].size(0))
 
-            pbar.set_postfix(epoch=epoch,
-                             batch=i, 
-                             likelihood=likelihood)
+            pbar.set_postfix(b=i, 
+                             l=likelihood.item(),
+                             al = likelihoods.avg.item(),
+                             bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
 
-    logger.info(f'epoch: {epoch}, Loss_D: {loss_d.avg}, Loss_G: {loss_g.avg}, likelihood: {likelihoods.avg}')
+    #logger.info(f'epoch: {epoch}, Loss_D: {loss_d.avg}, Loss_G: {loss_g.avg}, likelihood: {likelihoods.avg}')
+    logger.info(f'epoch: {epoch}, likelihood: {likelihoods.avg}, bpd: {util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg)}')
+    writer.add_scalar("Loss/likelihood",likelihoods.avg , epoch)
+    writer.add_scalar("Loss/bpd",util.bits_per_dim(likelihoods.avg) , epoch)
     vutils.save_image(real_cpu,
                     '%s/real_samples.png' % opt.outf,
                     normalize=True)
@@ -441,6 +449,7 @@ for epoch in range(opt.start_epoch, opt.niter):
 #        if opt.dry_run:
 #            break
     # do checkpointing
+    writer.flush()
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (opt.outf, epoch))
     torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (opt.outf, epoch))
     
