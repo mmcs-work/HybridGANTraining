@@ -398,7 +398,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             # Adversarial loss
             d_loss = -torch.mean(output_real) + torch.mean(output_fake) + div_gp
             #######################################
-            d_loss.backward()
+            d_loss.backward(retain_graph=True)
             optimizerD.step()
             ############################
             # (2) Update G network: maximize log(D(G(z)))
@@ -412,7 +412,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             errG = criterion(nn.Sigmoid()(output), label)
             z, sldj = netG(data[0].to(device), reverse=False)
             likelihood = loss_fn(z, sldj)
-            hybrid =  (1 - alpha) * likelihood
+            hybrid =  errG /20  +  likelihood
             hybrid.backward()
             D_G_z2 = output.mean().item()
             optimizerG.step()
@@ -424,18 +424,18 @@ for epoch in range(opt.start_epoch, opt.niter):
             
 #             loss_d.update(errD.item(), data[0].size(0))
 #             loss_g.update(errG.item(), data[0].size(0))
-            likelihoods.update(likelihood, data[0].size(0))
+            likelihoods.update(likelihood.item(), data[0].size(0))
 
             pbar.set_postfix(b=i, 
                              l=likelihood.item(),
-                             al = likelihoods.avg.item(),
+                             al = likelihoods.avg,
                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
 
     #logger.info(f'epoch: {epoch}, Loss_D: {loss_d.avg}, Loss_G: {loss_g.avg}, likelihood: {likelihoods.avg}')
     logger.info(f'epoch: {epoch}, likelihood: {likelihoods.avg}, bpd: {util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg)}')
     writer.add_scalar("Loss/likelihood",likelihoods.avg , epoch)
-    writer.add_scalar("Loss/bpd",util.bits_per_dim(likelihoods.avg) , epoch)
+    writer.add_scalar("Loss/bpd",util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg) , epoch)
     vutils.save_image(real_cpu,
                     '%s/real_samples.png' % opt.outf,
                     normalize=True)
