@@ -130,8 +130,8 @@ elif opt.dataset == 'mnist':
                                transforms.ToTensor(),
                               #  transforms.Normalize((0.5,), (0.5,)),
                            ]))
-    dataset, val_dataset = torch.utils.data.random_split(dataset, [50000,10000])
-    #dataset, val_dataset, _ = torch.utils.data.random_split(dataset, [1000,1000,58000])
+    #dataset, val_dataset = torch.utils.data.random_split(dataset, [50000,10000])
+    dataset, val_dataset, _ = torch.utils.data.random_split(dataset, [1000,1000,58000])
 
 elif opt.dataset == 'fake':
     dataset = dset.FakeData(image_size=(3, opt.imageSize, opt.imageSize),
@@ -335,13 +335,14 @@ best_model_counter = -1
 for epoch in range(opt.start_epoch, opt.niter):
 #     alpha -= 0.01
         
-    loss_d = util.AverageMeter()
-    loss_g = util.AverageMeter()
+#     loss_d = util.AverageMeter()
+#     loss_g = util.AverageMeter()
 #     Dx = util.AverageMeter()
 #     DGz1 = util.AverageMeter()
 #     DGz2 = util.AverageMeter()
     likelihoods = util.AverageMeter()
     val_likelihoods = util.AverageMeter()
+    netG.train()
     with tqdm(total=len(dataloader.dataset)) as pbar:
         for i, data in enumerate(dataloader):
             ############################
@@ -433,18 +434,20 @@ for epoch in range(opt.start_epoch, opt.niter):
                              al = likelihoods.avg,
                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
-
-    with tqdm(total=len(val_dataloader.dataset)) as pbar:
-        for i, data in enumerate(val_dataloader):
-            z, sldj = netG(data[0].to(device), reverse=False)
-            likelihood = loss_fn(z, sldj)
-            val_likelihoods.update(likelihood.item(), data[0].size(0))
-            #print(likelihood)
-            pbar.set_postfix(b=i, 
-                             l=likelihood.item(),
-                             val = val_likelihoods.avg,
-                             bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), val_likelihoods.avg))
-            pbar.update(batch_size)
+            
+            del real_cpu, real_imgs,label,z, x,fake, output, likelihood, hybrid, D_G_z2
+    with torch.no_grad():
+        with tqdm(total=len(val_dataloader.dataset)) as pbar:
+            for i, data in enumerate(val_dataloader):
+                z, sldj = netG(data[0].to(device), reverse=False)
+                likelihood = loss_fn(z, sldj)
+                val_likelihoods.update(likelihood.item(), data[0].size(0))
+                #print(likelihood)
+                pbar.set_postfix(b=i, 
+                                 l=likelihood.item(),
+                                 val = val_likelihoods.avg,
+                                 bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), val_likelihoods.avg))
+                pbar.update(batch_size)
     if val_likelihoods.avg < best_val_nlli:
         best_model_counter = epoch
         best_val_nlli = val_likelihoods.avg
@@ -452,16 +455,22 @@ for epoch in range(opt.start_epoch, opt.niter):
     logger.info(f'epoch: {epoch}, likelihood: {likelihoods.avg}, best_model_counter:{best_model_counter}bpd: {util.bits_per_dim(torch.zeros((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.int8), likelihoods.avg)}')
     writer.add_scalar("Loss/likelihood",likelihoods.avg , epoch)
     writer.add_scalar("Loss/bpd",util.bits_per_dim(torch.zeros((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.int8), likelihoods.avg) , epoch)
-    vutils.save_image(real_cpu,
-                    '%s/real_samples.png' % opt.outf,
-                    normalize=True)
+#     vutils.save_image(real_cpu,
+#                     '%s/real_samples.png' % opt.outf,
+#                     normalize=True)
             # fake = netG(fixed_noise)
+    netG.eval()
     x, _ = netG(fixed_noise, reverse=True)
+    x = torch.sigmoid(x)
+    z, sldj = netG(x, reverse=False)
+    likelihoodgen = loss_fn(fixed_noise, sldj)
+    logger.info(f'epoch: {epoch}, likelihoodgen: {likelihoodgen.item()}')
     fake = torch.sigmoid(x)
     vutils.save_image(fake.detach(),
                     '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
                     normalize=True)
-
+    del x,z,sldj,likelihoodgen,fake
+    
 #        if opt.dry_run:
 #            break
     # do checkpointing
