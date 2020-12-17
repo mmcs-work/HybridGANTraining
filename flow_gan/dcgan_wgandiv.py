@@ -391,7 +391,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             fake = torch.sigmoid(x)
             label.fill_(fake_label)
             #output_fake = netD(fake.detach())
-            output_fake = netD(x)
+            output_fake = netD(fake)
             #errD_fake = criterion(output, label)
 #             errD_fake.backward()
 #             D_G_z1 = output.mean().item()
