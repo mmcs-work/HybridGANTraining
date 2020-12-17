@@ -158,10 +158,7 @@ ngpu = int(opt.ngpu)
 nz = int(opt.nz)
 ngf = int(opt.ngf)
 ndf = int(opt.ndf)
-# Used in wgan loss
-# TODO: Use proper names
-p = 6
-k = 2
+
 cuda = torch.cuda.is_available()
 Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
 # custom weights initialization called on netG and netD
@@ -312,7 +309,8 @@ class Discriminator(nn.Module):
             nn.InstanceNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False)
+            nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False),
+            nn.Sigmoid()
         )
 
     def forward(self, input):
@@ -428,7 +426,6 @@ for epoch in range(opt.start_epoch, opt.niter):
                 optimizerG.step()
                 likelihoods.update(likelihood.item(), data[0].size(0))
                 del likelihood, hybrid,
-            likelihoods.update(likelihood.item(), data[0].size(0))
             pbar.set_postfix(b=i, 
                              al = likelihoods.avg,
                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
