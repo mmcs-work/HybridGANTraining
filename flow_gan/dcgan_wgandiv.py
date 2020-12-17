@@ -59,6 +59,9 @@ parser.add_argument('--generate_loc', default='', help='location of generate ima
 parser.add_argument('--generate_img_nums', type=int, default=100, help='Number of images to generate')
 #######################################################################################
 parser.add_argument('--likelihood', type=int, default=0, help='calculate likelihood')
+#######################################################################################
+parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
+parser.add_argument("--clip_value", type=float, default=0.01, help="lower and upper clip value for disc. weights")
 
 opt = parser.parse_args()
 print(opt)
@@ -268,6 +271,25 @@ if opt.likelihood == 1:
     sys.exit()       
 #################################
 
+def calculate_gradient_penalty(netD, batch_size,real_images, fake_images):
+    eta = torch.FloatTensor(batch_size,1,1,1).uniform_(0,1)
+    eta = eta.expand(batch_size, real_images.size(1), real_images.size(2), real_images.size(3))
+    eta = eta.cuda()
+    interpolated = eta * real_images + ((1 - eta) * fake_images)
+    interpolated = interpolated.cuda()
+
+    interpolated = Variable(interpolated, requires_grad=True)
+
+    prob_interpolated = torch.sigmoid(netD(interpolated))
+
+    # calculate gradients of probabilities with respect to examples
+    gradients = autograd.grad(outputs=prob_interpolated, inputs=interpolated,
+                           grad_outputs=torch.ones(prob_interpolated.size()).cuda(),
+                           create_graph=True, retain_graph=True)[0]
+
+    grad_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() #* self.lambda_term
+    return grad_penalty
+
 class Discriminator(nn.Module):
     def __init__(self, ngpu):
         super(Discriminator, self).__init__()
@@ -279,15 +301,15 @@ class Discriminator(nn.Module):
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf) x 32 x 32
             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 2),
+            nn.InstanceNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*2) x 16 x 16
             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 4),
+            nn.InstanceNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*4) x 8 x 8
             nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
-            nn.BatchNorm2d(ndf * 8),
+            nn.InstanceNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
             # state size. (ndf*8) x 4 x 4
             nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False)
@@ -378,20 +400,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             #errD = errD_real + errD_fake
 #             optimizerD.step()
             
-            #######################################
-            real_grad_out = Variable(Tensor(real_cpu.size(0), 1).fill_(1.0), requires_grad=False)
-            real_grad = autograd.grad(
-            output_real.unsqueeze(1), real_imgs, real_grad_out, create_graph=True, retain_graph=True, only_inputs=True
-        )[0]
-            real_grad_norm = real_grad.view(real_grad.size(0), -1).pow(2).sum(1) ** (p / 2)
-
-            fake_grad_out = Variable(Tensor(fake.size(0), 1).fill_(1.0), requires_grad=False)
-            fake_grad = autograd.grad(
-            output_fake.unsqueeze(1), x, fake_grad_out, create_graph=True, retain_graph=True, only_inputs=True
-        )[0]
-            fake_grad_norm = fake_grad.view(fake_grad.size(0), -1).pow(2).sum(1) ** (p / 2)
-
-            div_gp = torch.mean(real_grad_norm + fake_grad_norm) * k / 2
+            div_gp = calculate_gradient_penalty(netD, batch_size, real_imgs, x)
 
             # Adversarial loss
             d_loss = -torch.mean(output_real) + torch.mean(output_fake) + 0.5 * div_gp
@@ -399,43 +408,51 @@ for epoch in range(opt.start_epoch, opt.niter):
             d_loss.backward(retain_graph=True)
             optimizerD.step()
             
-            del d_loss, div_gp, fake_grad_norm,fake_grad,fake_grad_out,real_grad_norm, real_grad ,output_fake
+#             # Clip weights of discriminator
+#             for p in discriminator.parameters():
+#                 p.data.clamp_(-opt.clip_value, opt.clip_value)
+                
+            del d_loss, div_gp,
             ############################
             # (2) Update G network: maximize log(D(G(z)))
             ###########################
-            netG.zero_grad()
-            label.fill_(real_label)  # fake labels are real for generator cost
-            #output = netD(fake)
-            output = netD(real_imgs)
-            #print("---------------")
-            #printf(output.size())
-            #pp = output.squeeze()
-            errG = criterion(nn.Sigmoid()(output), label)
-            #z, sldj = netG(data[0].to(device), reverse=False)
-            z, sldj = netG(real_imgs, reverse=False)
-            likelihood = loss_fn(z, sldj)
-            hybrid =  errG   #/20  +  likelihood
-            hybrid.backward()
-            D_G_z2 = output.mean().item()
-            optimizerG.step()
-            
-            # compute likelihood
-#             with torch.no_grad():
-#                 z, sldj = netG(data[0].to(device), reverse=False)
-#                 likelihood = -loss_fn(z, sldj)
-            
-#             loss_d.update(errD.item(), data[0].size(0))
-#             loss_g.update(errG.item(), data[0].size(0))
-            likelihoods.update(likelihood.item(), data[0].size(0))
+            if i% opt.n_critic == 0:
+                netG.zero_grad()
+                label.fill_(real_label)  # fake labels are real for generator cost
+                #output = netD(fake)
+                output = netD(real_imgs)
+                #print("---------------")
+                #printf(output.size())
+                #pp = output.squeeze()
+#                 output = nn.Sigmoid()(output)
+                errG = -torch.mean(output)
+                #z, sldj = netG(data[0].to(device), reverse=False)
+                z, sldj = netG(real_imgs, reverse=False)
+                likelihood = loss_fn(z, sldj)
+                hybrid =  errG   #/20  +  likelihood
+                hybrid.backward()
+                #D_G_z2 = output.mean().item()
+                optimizerG.step()
 
-             
+                # compute likelihood
+    #             with torch.no_grad():
+    #                 z, sldj = netG(data[0].to(device), reverse=False)
+    #                 likelihood = -loss_fn(z, sldj)
+
+    #             loss_d.update(errD.item(), data[0].size(0))
+    #             loss_g.update(errG.item(), data[0].size(0))
+                likelihoods.update(likelihood.item(), data[0].size(0))
+                del likelihood, hybrid,
             pbar.set_postfix(b=i, 
-                             l=likelihood.item(),
                              al = likelihoods.avg,
                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
+#             pbar.set_postfix(b=i, 
+#                              l=likelihood.item(),
+#                              al = likelihoods.avg,
+#                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
             
-            del real_cpu, real_imgs,label,z, x,fake, output, likelihood, hybrid, D_G_z2
+            del real_cpu, real_imgs,label,z, x,fake
     with torch.no_grad():
         with tqdm(total=len(val_dataloader.dataset)) as pbar:
             for i, data in enumerate(val_dataloader):
