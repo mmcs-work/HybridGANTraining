@@ -375,13 +375,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             batch_size = real_cpu.size(0)
             label = torch.full((batch_size,), real_label,
                                dtype=real_cpu.dtype, device=device)
-            # print(real_cpu.shape)
             output_real = netD(real_imgs)
-#             print(output_real.shape)
-#             print(real_cpu.size(0))
-            #errD_real = criterion(output_real, label)
-#             errD_real.backward()
-#             D_x = output_real.mean().item()
             
             # train with fake
             # noise = torch.randn(batch_size, nz, 1, 1, device=device)
@@ -392,11 +386,6 @@ for epoch in range(opt.start_epoch, opt.niter):
             label.fill_(fake_label)
             #output_fake = netD(fake.detach())
             output_fake = netD(fake)
-            #errD_fake = criterion(output, label)
-#             errD_fake.backward()
-#             D_G_z1 = output.mean().item()
-            #errD = errD_real + errD_fake
-#             optimizerD.step()
             
             div_gp = calculate_gradient_penalty(netD, batch_size, real_imgs, x)
 
@@ -405,11 +394,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             #######################################
             d_loss.backward(retain_graph=True)
             optimizerD.step()
-            
-#             # Clip weights of discriminator
-#             for p in discriminator.parameters():
-#                 p.data.clamp_(-opt.clip_value, opt.clip_value)
-                
+                            
             del d_loss, div_gp,
             ############################
             # (2) Update G network: maximize log(D(G(z)))
