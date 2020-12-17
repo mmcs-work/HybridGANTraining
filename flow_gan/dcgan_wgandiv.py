@@ -206,7 +206,7 @@ class Generator(nn.Module):
         return output
 
 
-netG = RealNVP(num_scales=2, in_channels=nc, mid_channels=64, num_blocks=8).to(device)
+netG = RealNVP(num_scales=2, in_channels=nc, mid_channels=64, num_blocks=2).to(device)
 # netG = Generator(ngpu).to(device)
 # netG.apply(weights_init)
 if opt.netG != '':
@@ -414,7 +414,7 @@ for epoch in range(opt.start_epoch, opt.niter):
             #z, sldj = netG(data[0].to(device), reverse=False)
             z, sldj = netG(real_imgs, reverse=False)
             likelihood = loss_fn(z, sldj)
-            hybrid =  errG   #/20  +  likelihood
+            hybrid =  errG / 20  +  likelihood
             hybrid.backward()
             D_G_z2 = output.mean().item()
             optimizerG.step()
