@@ -419,37 +419,19 @@ for epoch in range(opt.start_epoch, opt.niter):
             if i% opt.n_critic == 0:
                 netG.zero_grad()
                 label.fill_(real_label)  # fake labels are real for generator cost
-                #output = netD(fake)
                 output = netD(real_imgs)
-                #print("---------------")
-                #printf(output.size())
-                #pp = output.squeeze()
-#                 output = nn.Sigmoid()(output)
                 errG = -torch.mean(output)
-                #z, sldj = netG(data[0].to(device), reverse=False)
                 z, sldj = netG(real_imgs, reverse=False)
                 likelihood = loss_fn(z, sldj)
                 hybrid =  errG   #/20  +  likelihood
                 hybrid.backward()
-                #D_G_z2 = output.mean().item()
                 optimizerG.step()
-
-                # compute likelihood
-    #             with torch.no_grad():
-    #                 z, sldj = netG(data[0].to(device), reverse=False)
-    #                 likelihood = -loss_fn(z, sldj)
-
-    #             loss_d.update(errD.item(), data[0].size(0))
-    #             loss_g.update(errG.item(), data[0].size(0))
                 likelihoods.update(likelihood.item(), data[0].size(0))
                 del likelihood, hybrid,
+            likelihoods.update(likelihood.item(), data[0].size(0))
             pbar.set_postfix(b=i, 
                              al = likelihoods.avg,
                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
-#             pbar.set_postfix(b=i, 
-#                              l=likelihood.item(),
-#                              al = likelihoods.avg,
-#                              bpd=util.bits_per_dim(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
             
             del real_cpu, real_imgs,label,z, x,fake
@@ -460,7 +442,6 @@ for epoch in range(opt.start_epoch, opt.niter):
                 z, sldj = netG(data[0].to(device), reverse=False)
                 likelihood = loss_fn(z, sldj)
                 val_likelihoods.update(likelihood.item(), data[0].size(0))
-                #print(likelihood)
                 pbar.set_postfix(b=i, 
                                  l=likelihood.item(),
                                  val = val_likelihoods.avg,
