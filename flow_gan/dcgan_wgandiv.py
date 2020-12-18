@@ -43,7 +43,7 @@ parser.add_argument('--niter', type=int, default=50, help='number of epochs to t
 parser.add_argument('--lr', type=float, default=0.0002, help='learning rate, default=0.0002')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
-parser.add_argument('--dry-run', action='store_true', help='check a single training cycle works')
+#parser.add_argument('--dry-run', action='store_true', help='check a single training cycle works')
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
 parser.add_argument('--netG', default='', help="path to netG (to continue training)")
 parser.add_argument('--netD', default='', help="path to netD (to continue training)")
@@ -61,6 +61,7 @@ parser.add_argument('--generate_img_nums', type=int, default=100, help='Number o
 parser.add_argument('--likelihood', type=int, default=0, help='calculate likelihood')
 #######################################################################################
 parser.add_argument("--n_critic", type=int, default=5, help="number of training steps for discriminator per iter")
+parser.add_argument("--dry_run", type=int, default=0, help="dry run?")
 parser.add_argument("--clip_value", type=float, default=0.01, help="lower and upper clip value for disc. weights")
 
 opt = parser.parse_args()
@@ -133,8 +134,10 @@ elif opt.dataset == 'mnist':
                                transforms.ToTensor(),
                               #  transforms.Normalize((0.5,), (0.5,)),
                            ]))
-    dataset, val_dataset = torch.utils.data.random_split(dataset, [50000,10000])
-    #dataset, val_dataset, _ = torch.utils.data.random_split(dataset, [1000,1000,58000])
+    if opt.dry_run == 0:
+        dataset, val_dataset = torch.utils.data.random_split(dataset, [50000,10000])
+    else:
+        dataset, val_dataset, _ = torch.utils.data.random_split(dataset, [1000,1000,58000])
 
 elif opt.dataset == 'fake':
     dataset = dset.FakeData(image_size=(3, opt.imageSize, opt.imageSize),
@@ -206,7 +209,7 @@ class Generator(nn.Module):
         return output
 
 
-netG = RealNVP(num_scales=2, in_channels=nc, mid_channels=64, num_blocks=8).to(device)
+netG = RealNVP(num_scales=2, in_channels=nc, mid_channels=64, num_blocks=4).to(device)
 # netG = Generator(ngpu).to(device)
 # netG.apply(weights_init)
 if opt.netG != '':
@@ -276,8 +279,8 @@ def calculate_gradient_penalty(netD, batch_size,real_images, fake_images):
     interpolated = interpolated.cuda()
 
     interpolated = Variable(interpolated, requires_grad=True)
-
-    prob_interpolated = torch.sigmoid(netD(interpolated))
+    op , _ = netD(interpolated)
+    prob_interpolated = op #torch.sigmoid(op)
 
     # calculate gradients of probabilities with respect to examples
     gradients = autograd.grad(outputs=prob_interpolated, inputs=interpolated,
@@ -287,44 +290,71 @@ def calculate_gradient_penalty(netD, batch_size,real_images, fake_images):
     grad_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() #* self.lambda_term
     return grad_penalty
 
+# class Discriminator(nn.Module):
+#     def __init__(self, ngpu):
+#         super(Discriminator, self).__init__()
+#         self.ngpu = ngpu
+#         self.main = nn.Sequential(
+#             # input is (nc) x 64 x 64
+#             nn.ReLU(),
+#             nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+#             nn.LeakyReLU(0.2, inplace=True),
+#             # state size. (ndf) x 32 x 32
+#             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+#             nn.InstanceNorm2d(ndf * 2),
+#             nn.LeakyReLU(0.2, inplace=True),
+#             # state size. (ndf*2) x 16 x 16
+#             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+#             nn.InstanceNorm2d(ndf * 4),
+#             nn.LeakyReLU(0.2, inplace=True),
+#             # state size. (ndf*4) x 8 x 8
+#             nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+#             nn.InstanceNorm2d(ndf * 8),
+#             nn.LeakyReLU(0.2, inplace=True),
+#             # state size. (ndf*8) x 4 x 4
+#             nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False),
+#             nn.Sigmoid()
+#         )
+
+#     def forward(self, input):
+#         if input.is_cuda and self.ngpu > 1:
+#             output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+#         else:
+#             output = self.main(input)
+
+#         return output.view(-1, 1).squeeze(1)
+
 class Discriminator(nn.Module):
-    def __init__(self, ngpu):
+    def __init__(self, dataset='mnist', ndf=64, dfc_dim=1024):
         super(Discriminator, self).__init__()
-        self.ngpu = ngpu
-        self.main = nn.Sequential(
-            # input is (nc) x 64 x 64
-            nn.ReLU(),
-            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 32 x 32
-            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-            nn.InstanceNorm2d(ndf * 2),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
-            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
-            nn.InstanceNorm2d(ndf * 4),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
-            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
-            nn.InstanceNorm2d(ndf * 8),
-            nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
-            nn.Conv2d(ndf * 8, 1, 1, 1, 0, bias=False),
-            nn.Sigmoid()
-        )
-
-    def forward(self, input):
-        if input.is_cuda and self.ngpu > 1:
-            output = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
+        
+        if dataset == 'mnist':
+            self.conv = nn.Sequential(
+                nn.Conv2d(in_channels=1, out_channels=1, kernel_size=5, stride=2, padding=2, bias=True),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Conv2d(in_channels=1, out_channels=ndf, kernel_size=5, stride=2, padding=2, bias=True),
+                nn.LeakyReLU(0.2, inplace=True)
+            )
+            
+            self.lin = nn.Sequential(
+                nn.Linear(in_features=49 * ndf, out_features=dfc_dim),
+                nn.LeakyReLU(0.2, inplace=True),
+                nn.Linear(in_features=dfc_dim, out_features=1)
+            )
         else:
-            output = self.main(input)
+            # https://github.com/ermongroup/flow-gan/blob/91b745e7811479a1d73074b3e33e24b3cbb38823/model.py#L611
+            raise NotImplemented
+    
+    def forward(self, x):
+        x = self.conv(x)
+        x = x.reshape(x.shape[0], -1)
+        x = self.lin(x)
+        
+        return torch.sigmoid(x), x.view(-1, 1).squeeze(1)
 
-        return output.view(-1, 1).squeeze(1)
 
-
-
-netD = Discriminator(ngpu).to(device)
-netD.apply(weights_init)
+netD = Discriminator().to(device)
+# netD.apply(weights_init)
 if opt.netD != '':
     netD.load_state_dict(torch.load(opt.netD))
 
@@ -339,8 +369,8 @@ fake_label = 0
 optimizerD = optim.Adam(netD.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 optimizerG = optim.Adam(netG.parameters(), lr=opt.lr, betas=(opt.beta1, 0.999))
 
-if opt.dry_run:
-    opt.niter = 1
+# if opt.dry_run:
+#     opt.niter = 1
 
 logger = logging.getLogger('logger')
 hdlr = logging.FileHandler(opt.log_path)
@@ -362,7 +392,7 @@ for epoch in range(opt.start_epoch, opt.niter):
 #     DGz2 = util.AverageMeter()
     likelihoods = util.AverageMeter()
     val_likelihoods = util.AverageMeter()
-    netG.train()
+    #netG.train()
     with tqdm(total=len(dataloader.dataset)) as pbar:
         for i, data in enumerate(dataloader):
             ############################
@@ -375,38 +405,43 @@ for epoch in range(opt.start_epoch, opt.niter):
             batch_size = real_cpu.size(0)
             label = torch.full((batch_size,), real_label,
                                dtype=real_cpu.dtype, device=device)
-            output_real = netD(real_imgs)
+            _, output_real = netD(real_imgs)
             
             # train with fake
             # noise = torch.randn(batch_size, nz, 1, 1, device=device)
             # fake = netG(noise)
-            z = Variable(torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32, device=device))
+            z = torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32, device=device)
             x, _ = netG(z, reverse=True)
             fake = torch.sigmoid(x)
             label.fill_(fake_label)
             #output_fake = netD(fake.detach())
-            output_fake = netD(fake)
+            _, output_fake = netD(fake)
             
-            div_gp = calculate_gradient_penalty(netD, batch_size, real_imgs, x)
+            div_gp = calculate_gradient_penalty(netD, batch_size, real_imgs, fake)
 
             # Adversarial loss
             d_loss = -torch.mean(output_real) + torch.mean(output_fake) + 0.5 * div_gp
+            logger.info(f'epoch: {epoch}, d_loss:{d_loss.item()} ,div_gp:{div_gp.item()}')
+            
             #######################################
             d_loss.backward(retain_graph=True)
             optimizerD.step()
                             
-            del d_loss, div_gp,
+            #del d_loss, div_gp,
             ############################
             # (2) Update G network: maximize log(D(G(z)))
             ###########################
             if i% opt.n_critic == 0:
                 netG.zero_grad()
                 label.fill_(real_label)  # fake labels are real for generator cost
-                output = netD(real_imgs)
+                z = torch.randn((batch_size, nc, opt.imageSize, opt.imageSize), dtype=torch.float32, device=device)
+                x, _ = netG(z, reverse=True)
+                fake = torch.sigmoid(x)
+                _,output = netD(fake)
                 errG = -torch.mean(output)
                 z, sldj = netG(real_imgs, reverse=False)
                 likelihood = loss_fn(z, sldj)
-                hybrid =  errG   #/20  +  likelihood
+                hybrid =  errG + likelihood
                 hybrid.backward()
                 optimizerG.step()
                 likelihoods.update(likelihood.item(), data[0].size(0))
@@ -441,13 +476,13 @@ for epoch in range(opt.start_epoch, opt.niter):
 #                     '%s/real_samples.png' % opt.outf,
 #                     normalize=True)
             # fake = netG(fixed_noise)
-    netG.eval()
+    
     x, _ = netG(fixed_noise, reverse=True)
-    x = torch.sigmoid(x)
-    z, sldj = netG(x, reverse=False)
+    fake = torch.sigmoid(x)
+    z, sldj = netG(fake, reverse=False)
     likelihoodgen = loss_fn(fixed_noise, sldj)
     logger.info(f'epoch: {epoch}, likelihoodgen: {likelihoodgen.item()}')
-    fake = torch.sigmoid(x)
+    
     vutils.save_image(fake.detach(),
                     '%s/fake_samples_epoch_%03d.png' % (opt.outf, epoch),
                     normalize=True)
