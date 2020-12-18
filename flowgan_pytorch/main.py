@@ -33,7 +33,9 @@ if __name__ == '__main__':
     parser.add_argument('--like_reg', type=float, default=0.0)
     parser.add_argument('--df_dim', type=int, default=64)
     parser.add_argument('--beta1', type=float, default=0.5)
-    parser.add_argument('--beta2', type=float, default=0.9)
+    parser.add_argument('--beta2', type=float, default=0.999)
+    parser.add_argument('--lambda_gp', type=float, default=10.)
+    
 
     FLAGS = parser.parse_args()
     print(FLAGS)

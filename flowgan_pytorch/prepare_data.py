@@ -10,14 +10,14 @@ def get_data(opt):
                            transform=transforms.Compose([
                                transforms.Resize(opt.img_size),
                                transforms.ToTensor(),
-                              #  transforms.Normalize((0.5,), (0.5,)),
+#                                transforms.Normalize((0.5,), (0.5,)),
                            ]))
         
         test = torchvision.datasets.MNIST(root=opt.root_dir, download=True,train = False,
                                transform=transforms.Compose([
                                    transforms.Resize(opt.img_size),
                                    transforms.ToTensor(),
-                                  #  transforms.Normalize((0.5,), (0.5,)),
+#                                    transforms.Normalize((0.5,), (0.5,)),
                                ]))
         train_dataset, val_dataset = torch.utils.data.random_split(train, [50000,10000])
 #         train_dataset, val_dataset, _ = torch.utils.data.random_split(train, [100, 100, 59800])  # for debug

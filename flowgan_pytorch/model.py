@@ -51,4 +51,4 @@ class Discriminator(nn.Module):
 #         print(x.shape)
         
 #         return torch.sigmoid(x), x
-        return x.squeeze(1)
+        return x
