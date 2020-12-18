@@ -37,8 +37,8 @@ def run(FLAGS):
     train_loader, val_loader, _ = get_data(FLAGS)
     nc = next(iter(train_loader))[0].shape[1]
     
-    netG = RealNVP(num_scales=2, in_channels=nc, mid_channels=64, num_blocks=8).to(device)
-    netD = Discriminator(dataset=FLAGS.dataset).to(device)
+    netG = RealNVP(num_scales=2, in_channels=nc, mid_channels=64, num_blocks=FLAGS.no_of_layers).to(device)
+    netD = Discriminator(dataset=FLAGS.dataset, ndf=FLAGS.df_dim).to(device)
     
     optimizerD = torch.optim.Adam(netD.parameters(), lr=FLAGS.lr, betas=(FLAGS.beta1, FLAGS.beta2))
     optimizerG = torch.optim.Adam(netG.parameters(), lr=FLAGS.lr, betas=(FLAGS.beta1, FLAGS.beta2))
@@ -50,12 +50,15 @@ def run(FLAGS):
     # load dict
     
     for epoch in range(FLAGS.epoch):
-        train(epoch, netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_fn, device, logger=None)
-#         val()
+        train(netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_fn, device, logger=None)
+        val(netG, FLAGS, val_loader, loss_fn, device)
         sample(netG, FLAGS, train_loader, epoch, device=device)
+        
+        torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (FLAGS.checkpoint_dir, epoch))
+        torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (FLAGS.checkpoint_dir, epoch))
 
 
-def train(epoch, netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_fn, device, logger):
+def train(netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_fn, device, logger):
     netG.train()
     netD.train()
     
@@ -107,9 +110,27 @@ def train(epoch, netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_f
                 optimizerG.step()
                 likelihoods.update(likelihood.item(), data.shape[0])
         
-            pbar.set_postfix(al=likelihoods.avg,
+            pbar.set_postfix(LL=likelihoods.avg,
                              bpd=util.bits_per_dim(torch.randn(data.size(), dtype=torch.float32), likelihoods.avg))
             pbar.update(batch_size)
+
+
+def val(netG, FLAGS, val_loader, loss_fn, device):
+    netG.eval()
+    val_likelihoods = util.AverageMeter()
+    with torch.no_grad():
+        with tqdm(total=len(val_loader.dataset)) as pbar:
+            for i, batch in enumerate(val_loader):
+                data, _ = batch
+                data = data.to(device)
+                batch_size = data.shape[0]
+                z, sldj = netG(data.to(device), reverse=False)
+                likelihood = loss_fn(z, sldj)
+                val_likelihoods.update(likelihood.item(), data.shape[0])
+                
+                pbar.set_postfix(LL_val=val_likelihoods.avg,
+                                 bpd=util.bits_per_dim(torch.randn(data.size(), dtype=torch.float32), val_likelihoods.avg))
+                pbar.update(batch_size)
             
 
 def sample(netG, FLAGS, loader, epoch, device):
