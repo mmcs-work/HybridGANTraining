@@ -10,7 +10,7 @@ def get_data(opt):
                            transform=transforms.Compose([
                                transforms.Resize(opt.img_size),
                                transforms.ToTensor(),
-                               transforms.Normalize((0.5,), (0.5,)),
+#                                transforms.Normalize((0.5,), (0.5,)),
                            ]))
         
         test = torchvision.datasets.MNIST(root=opt.root_dir, download=True,train = False,

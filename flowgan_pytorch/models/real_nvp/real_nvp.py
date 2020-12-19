@@ -32,9 +32,9 @@ class RealNVP(nn.Module):
         sldj = None
         if not reverse:
             # Expect inputs in [0, 1]
-            # if x.min() < 0 or x.max() > 1:
-            #     raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
-            #                      .format(x.min(), x.max()))
+            if x.min() < 0 or x.max() > 1:
+                raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
+                                 .format(x.min(), x.max()))
 
             # De-quantize and convert to logits
             x, sldj = self._pre_process(x)

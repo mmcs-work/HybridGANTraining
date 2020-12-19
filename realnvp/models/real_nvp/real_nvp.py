@@ -32,9 +32,9 @@ class RealNVP(nn.Module):
         sldj = None
         if not reverse:
             # Expect inputs in [0, 1]
-            # if x.min() < 0 or x.max() > 1:
-            #     raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
-            #                      .format(x.min(), x.max()))
+            if x.min() < 0 or x.max() > 1:
+                raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
+                                 .format(x.min(), x.max()))
 
             # De-quantize and convert to logits
             x, sldj = self._pre_process(x)
@@ -56,23 +56,15 @@ class RealNVP(nn.Module):
             - Dequantization: https://arxiv.org/abs/1511.01844, Section 3.1
             - Modeling logits: https://arxiv.org/abs/1605.08803, Section 4.1
         """
-        alpha = 1e-7
-        y = x
-        y = y * 255.0
-        corruption_level = 1.0
-        y = y + corruption_level * torch.rand_like(x)
-        y = y / (255.0 + corruption_level)
-        # y = (x * 255. + torch.rand_like(x)) / 256.
-        # y = (2 * y - 1) * self.data_constraint
-        # y = (y + 1) / 2
-        # y = y.log() - (1. - y).log()
-        #
-        # # Save log-determinant of Jacobian of initial transform
-        # ldj = F.softplus(y) + F.softplus(-y) \
-        #     - F.softplus((1. - self.data_constraint).log() - self.data_constraint.log())
-        # sldj = ldj.view(ldj.size(0), -1).sum(-1)
-        sldj = torch.sum(-torch.log(y) - torch.log(1 - y) + torch.log(1 - 2 * alpha),-1)
-        y = torch.log(y) - torch.log(1 - y)
+        y = (x * 255. + torch.rand_like(x)) / 256.
+        y = (2 * y - 1) * self.data_constraint
+        y = (y + 1) / 2
+        y = y.log() - (1. - y).log()
+
+        # Save log-determinant of Jacobian of initial transform
+        ldj = F.softplus(y) + F.softplus(-y) \
+            - F.softplus((1. - self.data_constraint).log() - self.data_constraint.log())
+        sldj = ldj.view(ldj.size(0), -1).sum(-1)
 
         return y, sldj
 
