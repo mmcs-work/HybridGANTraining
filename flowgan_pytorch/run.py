@@ -73,8 +73,8 @@ def train(netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_fn, epoc
         for i, (data, _) in enumerate(train_loader):
             # real images
             netG.train()
-            if data.min().item() < -0.001:
-                data = (data + 1.) / 2
+            # if data.min().item() < -0.001:
+            #     data = (data + 1.) / 2
             
             optimizerD.zero_grad()
             data = Variable(data.type(Tensor))
@@ -83,7 +83,8 @@ def train(netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_fn, epoc
             # fake images
             z = Variable(Tensor(torch.randn(data.size(), dtype=torch.float32).cuda()))
             x, _ = netG(z, reverse=True)
-            fake = torch.sigmoid(x)
+            #fake = torch.sigmoid(x)
+            fake = nn.Tanh()(x)
             output_fake = netD(fake)
             
             div_gp = compute_gradient_penalty(netD, data.data, fake.data)
@@ -95,7 +96,8 @@ def train(netG, netD, optimizerG, optimizerD, train_loader, FLAGS, loss_fn, epoc
             if i % FLAGS.n_critics == 0:
                 optimizerG.zero_grad()
                 x, _ = netG(z, reverse=True)
-                fake = torch.sigmoid(x)
+                #fake = torch.sigmoid(x)
+                fake = nn.Tanh()(x)
                 output = netD(fake)
                 errG = -torch.mean(output)
                 z, sldj = netG(data, reverse=False)
