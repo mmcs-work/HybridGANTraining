@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import numpy as np
 from models.real_nvp.coupling_layer import CouplingLayer, MaskType
 from util import squeeze_2x2
 
@@ -32,9 +32,9 @@ class RealNVP(nn.Module):
         sldj = None
         if not reverse:
             # Expect inputs in [0, 1]
-            if x.min() < 0 or x.max() > 1:
-                raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
-                                 .format(x.min(), x.max()))
+#             if x.min() < 0 or x.max() > 1:
+#                 raise ValueError('Expected x in [0, 1], got x with min/max {}/{}'
+#                                  .format(x.min(), x.max()))
 
             # De-quantize and convert to logits
             x, sldj = self._pre_process(x)
@@ -56,16 +56,53 @@ class RealNVP(nn.Module):
             - Dequantization: https://arxiv.org/abs/1511.01844, Section 3.1
             - Modeling logits: https://arxiv.org/abs/1605.08803, Section 4.1
         """
-        y = (x * 255. + torch.rand_like(x)) / 256.
-        y = (2 * y - 1) * self.data_constraint
-        y = (y + 1) / 2
-        y = y.log() - (1. - y).log()
+#         y = (x * 255. + torch.rand_like(x)) / 256.
+#         y = (2 * y - 1) * self.data_constraint
+#         y = (y + 1) / 2
+#         y = y.log() - (1. - y).log()
 
-        # Save log-determinant of Jacobian of initial transform
-        ldj = F.softplus(y) + F.softplus(-y) \
-            - F.softplus((1. - self.data_constraint).log() - self.data_constraint.log())
-        sldj = ldj.view(ldj.size(0), -1).sum(-1)
+#         # Save log-determinant of Jacobian of initial transform
+#         ldj = F.softplus(y) + F.softplus(-y) \
+#             - F.softplus((1. - self.data_constraint).log() - self.data_constraint.log())
+#         sldj = ldj.view(ldj.size(0), -1).sum(-1)
+# y = y*255.0
+#   corruption_level = 1.0
+#   y = y + corruption_level * tf.random_uniform(xs)
+#   y = y/(255.0 + corruption_level)
 
+#   #model logit instead of the x itself
+#   jac = 0
+  
+
+#   y = y*(1-2*alpha) + alpha
+#   if model_type == "nice":
+#     jac = tf.reduce_sum(-tf.log(y) - tf.log(1-y)+tf.log(1-2*alpha), [1]) 
+#   else:
+#     jac = tf.reduce_sum(-tf.log(y) - tf.log(1-y)+tf.log(1-2*alpha), [1,2,3])
+#   y = tf.log(y) - tf.log(1-y)
+#   sum_log_det_jacobians += jac
+
+        alpha = 1e-7
+        y = x
+        y = y * 255.0
+        
+        corruption_level = 1.0
+        y = y + corruption_level * torch.rand_like(x).cuda()
+        y = y / (255.0 + corruption_level)
+#         if torch.isnan(y).any():
+#             raise RuntimeError('Scale factor has NaN entries')
+        y = y*(1-2*alpha) + alpha
+        sldj = torch.sum(-torch.log(y) - torch.log(1 - y) + np.log(1 - 2 * alpha),dim=(1,2,3))
+        
+        #print(torch.min(y))
+#         if torch.isnan(torch.log(y)).any():
+#             raise RuntimeError('Scale factor has NaN entries')
+#         if torch.isnan(torch.log(1-y)).any():
+#             raise RuntimeError('Scale factor has NaN entries')
+#         if torch.isnan(y).any():
+#             raise RuntimeError('Scale factor has NaN entries')
+        y = torch.log(y) - torch.log(1 - y)
+        
         return y, sldj
 
 
