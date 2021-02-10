@@ -14,6 +14,12 @@ Image generation experiements are also conducted with the, along with the traini
 
 To check the modelling of different data, 2d data is also used as an alternative to the complex image data like MNIST/ CIFAR10. 
 
+Different experiments we have done
+- OOD detection
+- Discriminator score evaluation
+- Running FID score plots
+- Comparison of different model training using Likelihoods
+- Comparison of images generated with FID and IS score.
 
 ## Experiemented models
 
