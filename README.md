@@ -21,6 +21,13 @@ Different experiments we have done
 - Comparison of different model training using Likelihoods
 - Comparison of images generated with FID and IS score.
 
+## Sample Generated Images
+
+![CIFAR10 Adv](/flowgan/final_images_for_gif/cifar_adv/all_images.gif)
+![CIFAR10 Hybrid](/flowgan/final_images_for_gif/cifar_hyb/all_images.gif)
+![MNIST Adv](/flowgan/final_images_for_gif/mnist_adv/all_images.gif)
+![MNIST Hybrid](/flowgan/final_images_for_gif/mnist_hyb/all_images.gif)
+
 ## Experiemented models
 
 - [x] FlowGAN (3 different loss objectives)
