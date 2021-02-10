@@ -36,7 +36,7 @@ There are following folder in this repository denoting different groups of exper
 
 |Folder|Used for|
 |----------|:-------------:|
-|2d data Code | Here we have done the experiments with synthetic 2d data. |
+|2d data Code | The experiments with synthetic 2d data have been done here. |
 |dcgan	| The vanilla DCGAN is used to start our initial experiments. |
 |flowgan | Final models with the WGAN GP. Same code is used for without WGAN experiments as well with relevant changes.|
 |glow | A different flow based model used separately. Comparable with RealNVP.|
