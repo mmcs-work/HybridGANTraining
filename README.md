@@ -26,9 +26,22 @@ Different experiments we have done
 ![CIFAR10 Adv](/flowgan/final_images_for_gif/cifar_adv/all_images.gif)
 ![CIFAR10 Hybrid](/flowgan/final_images_for_gif/cifar_hyb/all_images.gif)
 ![CIFAR10 MLE](/flowgan/cifar_mle_sample/all_images.gif)
+
+In order from left to right
+- CIFAR10 Adv
+- CIFAR10 Hybrid
+- CIFAR10 MLE
+
+
 ![MNIST Adv](/flowgan/final_images_for_gif/mnist_adv/all_images.gif)
 ![MNIST Hybrid](/flowgan/final_images_for_gif/mnist_hyb/all_images.gif)
 ![MNIST MLE](/flowgan/mnist_mle_sample/all_images.gif)
+
+
+In order from left to right
+- MNIST Adv
+- MNIST Hybrid
+- MNIST MLE
 
 ## Experiemented models
 
